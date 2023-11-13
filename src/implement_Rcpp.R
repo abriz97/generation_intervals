@@ -10,6 +10,9 @@ relative_path <- "src/implement_Rcpp.R"
 here::i_am(relative_path)
 gitdir <- here::here() 
 source(file.path(gitdir, 'R/utils.R'))
+source(file.path(gitdir, 'R/gibbs_gi_distribution.R'))
+
+overleaf_figs <- "/extraspace/latex/overleaf/generation-intervals/figures"
 
 # DEFINE TRANSMISSION NETWORK
 
@@ -41,28 +44,6 @@ if(0){
 }
 
 # load Rcpp functions in file.path(gitdir, "C/gibbs.cpp")
-make_cpp_data_gibbs_network <- function(network){
-
-    # need to first set all character ids to integers in a meaningful manner.
-    src <- make_source_vector(network)
-    rec <- make_recipients_list(network)
-    char2int_dict <- setNames(seq_along(rec) - 1, names(rec))
-
-    # names(rec) <- seq_along(rec)
-    na2minus1 <- function(x) {x[is.na(x)] <- -1; x}
-    rec <- lapply(rec, function(x) unname(char2int_dict[x]) )
-    rec <- lapply(rec, na2minus1)
-    src <- unname(char2int_dict[src])
-    src <- na2minus1(src)
-
-    list(
-        initial_values = network$nodes$m,
-        source = src,
-        recipients = rec, 
-        min_infection_date = network$nodes$m,
-        max_infection_date = network$nodes$M
-    )
-}
 
 
 sourceCpp(file.path(gitdir, "C/gibbs.cpp"))
@@ -87,82 +68,54 @@ p1
 # ggpubr::ggarrange(p1, p2)
 
 
-# now consider a case in which the generation interval is exponentialy
+# now consider a case in which the generation interval is gamma distributed
+
 SHAPE = 1.5; RATE = 2
-MODE = max(0, (SHAPE - 1) / RATE)
-{
-    # visualise generation interval distribution
-    .seq <- seq(0, 10, by=.1)
-    plot(.seq, dgamma(x=.seq, shape=SHAPE, rate=RATE), type="l")
-    abline(v=MODE, col="red")
-}
 
 # now, what do we have to do at every Gibbs Sampling iteration...
 # 1. find [a, b] as before. Cool. this is easy.
 # 2. find the maximizers of each function in the product... 
-y_s <- 2.1; y_r <- 3
+y_s <- 2.1; y_r <- c(3, 3.5)
 a <- 2.5; b <- 3
 
-# compute information for factors
-# f_sup_prior <- 1/(3 - 2.5); int_prior <- 1/f_sup_prior
-densities <- list(
-    prior = c(mode = (a+b)/2, I = b - a, sup = (b-a)^(-1)),
-    source = get_maximisers_truncated_gamma(min= a - y_s , max= b - y_s ) ,
-    recipients = get_maximisers_truncated_gamma(min= y_r - b, max= y_r - a)
-)
+posterior <- estimate_dates_network_gibbs_generationinterval(
+    network,
+    iters=100, verbose=TRUE) 
+plot_posterior_doi(DT=posterior)
 
-# compute the normalising constant of the product of pdfs
-kappa <- prod( sapply(densities, `[`, "I") )
-# now compute the supemums of each factor, and divide by the maximum
-sups <- sapply(densities, `[`, "sup") 
-# identify idx with maximum sup:
-n0_idx <- which.max(sups)
-sups_const <- prod(sups) / max(sups)
+priors_u <- make_uniform_priors(network)
 
-if( which.max(sups) == 2){
-    source <- TRUE
-    recipient <- FALSE
+
+if(0){
+    # visuallise
+    delta <- .0001
+    x_range <- seq(from=a, to=b, by=delta)
+    y <- sapply(x_range, function(x){
+        x <- densities$multiplier * x + densities$offset
+        c(2, dgamma(x[densities$family == "gamma"], shape=SHAPE, rate=RATE))
+    })
+    pdfs <- data.table(t(as.data.table(y)))
+    pdfs[, all := V1 * V2 * V3 * V4, ]
+    pdfs <- pdfs[, lapply(.SD, proportions)]
+    pdfs <- pdfs[, lapply(.SD, function(x) {x / delta}) ]
+    pdfs[, x:=x_range]
+
+    dim(y)
+    integral_y <- sum(y) * delta
+    sprintf("integral of y is %f", integral_y)
+
+    g <- ggplot(data.frame(y=samples), aes(y)) +
+    geom_histogram(aes(y= after_stat(density) ), fill="grey80", color="black")  +
+    geom_line( data= pdfs, aes(x=x, y=all, color="all")) +
+    geom_line( data= pdfs, aes(x=x, y=V1, color="prior"), linetype="dashed") +
+    geom_line( data= pdfs, aes(x=x, y=V2, color="source"), linetype="dashed") +
+    geom_line( data= pdfs, aes(x=x, y=V3, color="recipient"), linetype="dashed") +
+    geom_line( data= pdfs, aes(x=x, y=V4, color="recipient"), linetype="dashed") +
+    theme_minimal(base_size=12) + 
+    labs( x="samples", y="density", title="ARSP Example: pdf vs samples")
+
+    filename <- file.path(overleaf_figs, "arsp_example_gamma.pdf")
+    ggsave(plot=g, filename=filename, width=6, height=4.5)
+    system(sprintf("zathura %s &", filename))
+
 }
-
-
-# initalise the acceptance probability
-log_c_lambda <- log(sups_const)
-
-# This implies we should use the source distribution for our rejection sampling...
-yy <- c()
-
-# can we compute the acceptance probability? It is the inverse of the maximum sup_f
-accepted = FALSE
-while ( TRUE ){
-    
-    if ( source ){
-        sample <- sample_truncated_distribution(fname="gamma", m=a - y_s, M = b - y_s, fargs=list(shape=SHAPE, rate=RATE))
-        sample <- y_s + sample
-
-    }else if ( recipient ){
-        sample <- sample_truncated_distribution(fname="gamma", m=y_r - b, M = y_r - a, fargs=list(shape=SHAPE, rate=RATE))
-        sample <- y_r - sample # TODO to check
-    }
-
-    # Once we have a sample, we can finally compute the acceptance probability:
-    # we need to evaluate the pdf of each term in the product, and divide by the maximum 
-    log_pdf_ratio_at_sample <- {
-        logs <- c(
-             - log( densities$prior["I"] ),
-            dgamma(x = sample - y_s, shape=SHAPE, rate=RATE, log=TRUE) - log(densities$source["I"] ),
-            dgamma(x = y_r - sample, shape=SHAPE, rate=RATE, log=TRUE) - log(densities$recipients["I"])
-        )
-        sum(logs) - logs[[n0_idx]] - log_c_lambda
-    }
-    yy <- c(exp(log_pdf_ratio_at_sample), yy)
-    print(yy[1])
-
-    if ( exp(log_pdf_ratio_at_sample) > runif(1)){
-        accepted <- TRUE
-    }
-}
-
-# But this could still be right! The acceptance probabilities do NOT need to look
-# uniformly distributed!!!!!!
-hist(yy)
-

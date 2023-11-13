@@ -268,18 +268,25 @@ plot_posterior_doi <- function(DT){
 
 }
 
-get_maximisers_truncated_gamma <- function(shape = SHAPE, rate=RATE, min, max){
+make_cpp_data_gibbs_network <- function(network){
 
-    # Want to find mode, intergral and sup f
-    mode <- max(0, (shape - 1) / rate)
-    if( mode < min ) mode <- min
-    if( mode > max ) mode <- max
+    # need to first set all character ids to integers in a meaningful manner.
+    src <- make_source_vector(network)
+    rec <- make_recipients_list(network)
+    char2int_dict <- setNames(seq_along(rec) - 1, names(rec))
 
-    # integral
-    integral <- pgamma(q=max, shape=shape, rate=rate) - pgamma(q=min, shape=shape, rate=rate)
+    # names(rec) <- seq_along(rec)
+    na2minus1 <- function(x) {x[is.na(x)] <- -1; x}
+    rec <- lapply(rec, function(x) unname(char2int_dict[x]) )
+    rec <- lapply(rec, na2minus1)
+    src <- unname(char2int_dict[src])
+    src <- na2minus1(src)
 
-    # supremum of f
-    sup_f <- dgamma(x=mode, shape=shape, rate=rate)/integral
-
-    return(c( mode = mode, I = integral, sup = sup_f))
+    list(
+        initial_values = network$nodes$m,
+        source = src,
+        recipients = rec, 
+        min_infection_date = network$nodes$m,
+        max_infection_date = network$nodes$M
+    )
 }
