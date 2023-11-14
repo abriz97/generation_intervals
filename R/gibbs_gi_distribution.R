@@ -135,35 +135,34 @@ estimate_dates_network_gibbs_generationinterval <- function(network, iters, y0 =
     sources <- make_source_vector(network)
 
     # initialize output
-    output <- matrix(NA_real_, n_nodes * (iters + 1), nrow = iters + 1, ncol = n_nodes)
+    output <- matrix(NA_real_, n_nodes * iters, nrow = iters, ncol = n_nodes)
     colnames(output) <- nodes$ID
-    output[1, ] <- y0
+
+    current <- y0
+    # output[1, ] <- y0
 
 
-    for (iter in (1:iters) + 1) {
+    for (iter in (1:iters) ) {
         if (verbose) {
             sprintf("iteration %d \n", iter) |> cat()
         }
-
 
         for (v in 1:n_nodes) {
             src <- sources[v]
             rec <- recipients[[v]]
             # prior   <- priors[[v]]
-            y_s <- output[iter - 1, nodes$ID %in% src]
-            y_r <- output[iter - 1, nodes$ID %in% rec]
+            y_s <- current[nodes$ID %in% src]
+            y_r <- current[nodes$ID %in% rec]
 
             m <- max(c(initial_ms[v], y_s))
             M <- min(c(initial_Ms[v], y_r))
-
-            sprintf( "m=%s, M=%s\n",m,M) |> cat()
 
             draw_v <- one_step_arsp_gammagi(
                 shape = shape, rate = rate,
                 y_s = y_s, y_r = y_r, a = m, b = M
             )
 
-            output[iter, v] <- draw_v
+            current[v] <- draw_v
 
             if (verbose) {
                 sprintf(
@@ -172,6 +171,7 @@ estimate_dates_network_gibbs_generationinterval <- function(network, iters, y0 =
                 ) |> cat()
             }
         }
+        output[iter, ] <- current
 
         if (verbose) cat("\n")
     }
@@ -179,3 +179,26 @@ estimate_dates_network_gibbs_generationinterval <- function(network, iters, y0 =
     return(output[-1, ])
 }
 
+plot_network_and_posterior <- function(net, post=NULL){
+
+    tmp1 <- network::network(x=network$edges,directed=TRUE)
+
+    p0 <- ggnet::ggnet2(tmp1, size = 8, label = TRUE, label.size = 5,
+        arrow.size=5, arrow.gap=.05)
+         
+    p1 <- ggplot(network$nodes, aes(y=ID, color=ID)) +
+        geom_point(aes(x=m)) +
+        geom_point(aes(x=M)) +
+        geom_linerange(aes(xmin=m, xmax=M)) +
+        labs(color="individual", x="date of infection", y=NULL) +
+        theme_minimal()
+
+    p2 <- plot_posterior_doi(DT=posterior)
+
+    if( is.null(post) ){
+        ( p0 / p1 ) 
+    }else{
+        require(patchwork)
+        (( p0 / p1 ) | p2 ) + plot_layout(guides="collect")
+    }
+}

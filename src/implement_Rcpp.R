@@ -80,11 +80,8 @@ a <- 2.5; b <- 3
 
 posterior <- estimate_dates_network_gibbs_generationinterval(
     network,
-    iters=100, verbose=TRUE) 
+    iters=1000, verbose=TRUE) 
 plot_posterior_doi(DT=posterior)
-
-priors_u <- make_uniform_priors(network)
-
 
 if(0){
     # visuallise
@@ -115,7 +112,28 @@ if(0){
     labs( x="samples", y="density", title="ARSP Example: pdf vs samples")
 
     filename <- file.path(overleaf_figs, "arsp_example_gamma.pdf")
-    ggsave(plot=g, filename=filename, width=6, height=4.5)
+    ggsave(plot=g, filename=filename, width=6, height=4)
     system(sprintf("zathura %s &", filename))
+
+}
+
+
+plot <- plot_network_and_posterior(network, posterior)
+filename <- file.path(overleaf_figs, "gamma_gi_all.pdf")
+ggsave(plot=plot, filename=filename, width=8, height=5)
+system(sprintf("zathura %s &", filename))
+
+
+if(0){
+    idx <- which(posterior[,1 ] > posterior[, 2])
+    idx <- c(idx, idx + 1, idx - 1)
+    posterior[idx,]
+    tmp <- data.frame(x=seq(from=0, to=2, by=.01))
+    tmp$y <- dgamma(tmp$x, shape=SHAPE, rate=RATE)
+
+    dim(posterior)
+    ggplot(data.frame(posterior), aes(x=B - A)) + 
+    geom_histogram() +
+    geom_line( data=tmp, aes(x=x, y=y * 70 ), color="red") 
 
 }
